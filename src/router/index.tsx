@@ -7,8 +7,8 @@ function RouterApp() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/a" element={<Dijkstra />} />
-        <Route path="/" element={<MinimalDijkstra />} />
+        <Route path="/" element={<Dijkstra />} />
+        <Route path="/d" element={<MinimalDijkstra />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
