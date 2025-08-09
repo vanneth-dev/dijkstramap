@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Search, ArrowRight, RefreshCcw } from 'lucide-react';
 
+const SPEED_KMH = 80;
+
 const baseCityConnections: Record<
   string,
   Record<string, { distance: number; trafficDelay: number; trafficProb: number }>
@@ -130,6 +132,32 @@ const getPath = (previous: Record<string, string | null>, start: string, end: st
   return path[0] === start ? path : [];
 };
 
+const getPathStats = (
+  path: string[],
+  graph: TrafficGraph
+): { totalDistance: number; totalTime: number } => {
+  let totalDistance = 0;
+  let totalTime = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const from = path[i];
+    const to = path[i + 1];
+    const edge = graph[from]?.[to];
+    if (edge) {
+      const effectiveDistance = getEffectiveWeight(edge);
+      totalDistance += effectiveDistance;
+    }
+  }
+  totalTime = totalDistance / SPEED_KMH;
+  return { totalDistance, totalTime };
+};
+
+const formatTime = (hours: number) => {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h === 0) return `${m} min`;
+  return `${h} hr${h > 1 ? 's' : ''} ${m} min`;
+};
+
 const Dijkstra: React.FC = () => {
   const [startCity, setStartCity] = useState<string>('Passau');
   const [endCity, setEndCity] = useState<string>('Frankfurt');
@@ -167,8 +195,12 @@ const Dijkstra: React.FC = () => {
     return getPath(dijkstraResult.previous, startCity, endCity);
   }, [dijkstraResult.previous, startCity, endCity]);
 
-  const totalDistance = dijkstraResult.distances[endCity];
   const isPathFound = shortestPath.length > 0 && shortestPath[0] === startCity;
+
+  const { totalDistance, totalTime } = useMemo(() => {
+    if (!isPathFound) return { totalDistance: 0, totalTime: 0 };
+    return getPathStats(shortestPath, trafficGraph);
+  }, [shortestPath, trafficGraph, isPathFound]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -253,9 +285,14 @@ const Dijkstra: React.FC = () => {
             </div>
           )}
           {isPathFound && (
-            <p className="mt-3 text-gray-700 font-medium">
-              Total Estimated Distance (with traffic): {totalDistance.toFixed(2)} km
-            </p>
+            <div className="mt-3 text-gray-700 font-medium space-y-1">
+              <div>
+                Total Estimated Distance (with traffic): {totalDistance.toFixed(2)} km
+              </div>
+                <div>
+                Total Estimated Time (with traffic, at a speed of {SPEED_KMH} km/h): {formatTime(totalTime)}
+                </div>
+            </div>
           )}
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -288,6 +325,7 @@ const Dijkstra: React.FC = () => {
                 <th className="border border-gray-300 p-2 text-right">Status</th>
                 <th className="border border-gray-300 p-2 text-right">Traffic Delay (min)</th>
                 <th className="border border-gray-300 p-2 text-right">Traffic Probability</th>
+                <th className="border border-gray-300 p-2 text-right">Estimated Time</th>
               </tr>
             </thead>
             <tbody>
@@ -295,6 +333,10 @@ const Dijkstra: React.FC = () => {
                 const dist = dijkstraResult.distances[city];
                 const prev = dijkstraResult.previous[city];
                 const visited = dijkstraResult.visited.has(city);
+                let estTime = '-';
+                if (dist !== Infinity) {
+                  estTime = formatTime(dist / SPEED_KMH);
+                }
                 return (
                   <tr key={city} className={visited ? '' : 'opacity-60'}>
                     <td className="border border-gray-300 p-2">{city}</td>
@@ -315,6 +357,7 @@ const Dijkstra: React.FC = () => {
                         return edge ? (edge.trafficProb * 100).toFixed(0) + '%' : '0%';
                       })()}
                     </td>
+                    <td className="border border-gray-300 p-2 text-right">{estTime}</td>
                   </tr>
                 );
               })}
