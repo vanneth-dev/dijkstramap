@@ -6,6 +6,25 @@ const SPEED_KMH = 80;
 
 const baseCityConnections = getBaseCityConnections();
 
+type TrafficGraph = Record<
+  string,
+  Record<
+    string,
+    {
+      distance: number;
+      trafficDelay: number;
+      trafficProb: number;
+      historicalDelays: number[];
+    }
+  >
+>;
+
+interface DijkstraResult {
+  distances: Record<string, number>;
+  previous: Record<string, string | null>;
+  visited: Set<string>;
+}
+
 const bayesianUpdate = (
   prior: number,
   evidence: boolean,
@@ -33,19 +52,6 @@ const neuralNetworkPredictDelayMultiplier = (
   const predicted = 0.7 * avgHistorical + 0.3 * currentDelay;
   return Math.max(1, 1 + predicted);
 };
-
-type TrafficGraph = Record<
-  string,
-  Record<
-    string,
-    {
-      distance: number;
-      trafficDelay: number;
-      trafficProb: number;
-      historicalDelays: number[];
-    }
-  >
->;
 
 const initializeTrafficGraph = (): TrafficGraph => {
   const graph: TrafficGraph = {};
@@ -82,12 +88,6 @@ const getEffectiveWeight = (
   const delayInKm = (delayMultiplier - 1) * 60;
   return edge.distance + delayInKm;
 };
-
-interface DijkstraResult {
-  distances: Record<string, number>;
-  previous: Record<string, string | null>;
-  visited: Set<string>;
-}
 
 const dijkstra = (
   graph: TrafficGraph,
