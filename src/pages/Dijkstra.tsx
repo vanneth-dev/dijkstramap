@@ -65,12 +65,16 @@ const initializeTrafficGraph = (): TrafficGraph => {
   return graph;
 };
 
-const getEffectiveWeight = (edge: {
-  distance: number;
-  trafficDelay: number;
-  trafficProb: number;
-  historicalDelays: number[];
-}) => {
+const getEffectiveWeight = (
+  edge: {
+    distance: number;
+    trafficDelay: number;
+    trafficProb: number;
+    historicalDelays: number[];
+  },
+  withTraffic: boolean
+) => {
+  if (!withTraffic) return edge.distance;
   const delayMultiplier = neuralNetworkPredictDelayMultiplier(
     edge.historicalDelays,
     edge.trafficDelay
@@ -85,7 +89,11 @@ interface DijkstraResult {
   visited: Set<string>;
 }
 
-const dijkstra = (graph: TrafficGraph, start: string): DijkstraResult => {
+const dijkstra = (
+  graph: TrafficGraph,
+  start: string,
+  withTraffic: boolean
+): DijkstraResult => {
   const distances: Record<string, number> = {};
   const previous: Record<string, string | null> = {};
   const visited = new Set<string>();
@@ -118,7 +126,7 @@ const dijkstra = (graph: TrafficGraph, start: string): DijkstraResult => {
       if (!unvisited.has(neighbor)) return;
 
       const newDistance =
-        distances[current as string] + getEffectiveWeight(edge);
+        distances[current as string] + getEffectiveWeight(edge, withTraffic);
       if (newDistance < distances[neighbor]) {
         distances[neighbor] = newDistance;
         previous[neighbor] = current;
@@ -146,28 +154,10 @@ const getPath = (
   return path[0] === start ? path : [];
 };
 
-// Simple stats: no traffic
-const getSimplePathStats = (
-  path: string[],
-  graph: TrafficGraph
-): { totalDistance: number; totalTime: number } => {
-  let totalDistance = 0;
-  for (let i = 0; i < path.length - 1; i++) {
-    const from = path[i];
-    const to = path[i + 1];
-    const edge = graph[from]?.[to];
-    if (edge) {
-      totalDistance += edge.distance;
-    }
-  }
-  const totalTime = totalDistance / SPEED_KMH;
-  return { totalDistance, totalTime };
-};
-
-// With traffic
 const getPathStats = (
   path: string[],
-  graph: TrafficGraph
+  graph: TrafficGraph,
+  withTraffic: boolean
 ): { totalDistance: number; totalTime: number } => {
   let totalDistance = 0;
   for (let i = 0; i < path.length - 1; i++) {
@@ -175,7 +165,7 @@ const getPathStats = (
     const to = path[i + 1];
     const edge = graph[from]?.[to];
     if (edge) {
-      const effectiveDistance = getEffectiveWeight(edge);
+      const effectiveDistance = getEffectiveWeight(edge, withTraffic);
       totalDistance += effectiveDistance;
     }
   }
@@ -197,6 +187,7 @@ const Dijkstra: React.FC = () => {
   const [trafficGraph, setTrafficGraph] = useState<TrafficGraph>(() =>
     initializeTrafficGraph()
   );
+  const [withTraffic, setWithTraffic] = useState<boolean>(true);
 
   const updateTrafficData = () => {
     setTrafficGraph((prevGraph) => {
@@ -222,8 +213,8 @@ const Dijkstra: React.FC = () => {
   );
 
   const dijkstraResult = useMemo(() => {
-    return dijkstra(trafficGraph, startCity);
-  }, [trafficGraph, startCity]);
+    return dijkstra(trafficGraph, startCity, withTraffic);
+  }, [trafficGraph, startCity, withTraffic]);
 
   const shortestPath = useMemo(() => {
     return getPath(dijkstraResult.previous, startCity, endCity);
@@ -231,18 +222,17 @@ const Dijkstra: React.FC = () => {
 
   const isPathFound = shortestPath.length > 0 && shortestPath[0] === startCity;
 
-  // Simple stats (no traffic)
-  const { totalDistance: simpleDistance, totalTime: simpleTime } =
-    useMemo(() => {
-      if (!isPathFound) return { totalDistance: 0, totalTime: 0 };
-      return getSimplePathStats(shortestPath, trafficGraph);
-    }, [shortestPath, trafficGraph, isPathFound]);
-
-  // With traffic
+  // Stats for current mode
   const { totalDistance, totalTime } = useMemo(() => {
     if (!isPathFound) return { totalDistance: 0, totalTime: 0 };
-    return getPathStats(shortestPath, trafficGraph);
-  }, [shortestPath, trafficGraph, isPathFound]);
+    return getPathStats(shortestPath, trafficGraph, withTraffic);
+  }, [shortestPath, trafficGraph, isPathFound, withTraffic]);
+
+  // Stats for the other mode (for comparison)
+  const { totalDistance: altDistance, totalTime: altTime } = useMemo(() => {
+    if (!isPathFound) return { totalDistance: 0, totalTime: 0 };
+    return getPathStats(shortestPath, trafficGraph, !withTraffic);
+  }, [shortestPath, trafficGraph, isPathFound, withTraffic]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -315,6 +305,24 @@ const Dijkstra: React.FC = () => {
             Simulates new traffic reports & updates route times.
           </span>
         </div>
+        <div className="mb-6 flex items-center gap-4">
+          <label className="inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={withTraffic}
+              onChange={() => setWithTraffic((v) => !v)}
+              className="form-checkbox h-4 w-4 text-indigo-600"
+            />
+            <span className="ml-2 text-sm text-gray-700 font-medium">
+              Enable Traffic Prediction
+            </span>
+          </label>
+          <span className="text-xs text-gray-500">
+            {withTraffic
+              ? "Shortest path considers traffic delays."
+              : "Shortest path ignores traffic delays."}
+          </span>
+        </div>
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Shortest Route
@@ -351,19 +359,22 @@ const Dijkstra: React.FC = () => {
           {isPathFound && (
             <div className="mt-3 text-gray-700 font-medium space-y-2">
               <div>
-                <span className="font-semibold">Simple (no traffic):</span>
+                <span className="font-semibold">
+                  {withTraffic ? "With Traffic:" : "Simple (no traffic):"}
+                </span>
                 <br />
-                Total Distance: {simpleDistance.toFixed(2)} km
+                Total Distance: {totalDistance.toFixed(2)} km
                 <br />
-                Total Time (at {SPEED_KMH} km/h): {formatTime(simpleTime)}
+                Total Time (at {SPEED_KMH} km/h): {formatTime(totalTime)}
               </div>
               <div>
-                <span className="font-semibold">With Traffic:</span>
+                <span className="font-semibold">
+                  {withTraffic ? "Simple (no traffic):" : "With Traffic:"}
+                </span>
                 <br />
-                Total Estimated Distance: {totalDistance.toFixed(2)} km
+                Total Distance: {altDistance.toFixed(2)} km
                 <br />
-                Total Estimated Time (at {SPEED_KMH} km/h):{" "}
-                {formatTime(totalTime)}
+                Total Time (at {SPEED_KMH} km/h): {formatTime(altTime)}
               </div>
             </div>
           )}
